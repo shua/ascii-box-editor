@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::io::prelude::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -28,16 +28,6 @@ impl Direction {
             Dn => Up,
             Lt => Rt,
             Rt => Lt,
-        }
-    }
-
-    fn turn(self) -> Direction {
-        use Direction::*;
-        match self {
-            Up => Rt,
-            Rt => Dn,
-            Dn => Lt,
-            Lt => Up,
         }
     }
 }
@@ -110,45 +100,19 @@ impl Lines {
         p.in_dir(d).and_then(|p| self.at(p).map(|c| (p, c)))
     }
 
-    fn below(&self, p: Point) -> Option<(Point, char)> {
-        self.in_dir(p, Direction::Dn)
-    }
-    fn above(&self, p: Point) -> Option<(Point, char)> {
-        self.in_dir(p, Direction::Up)
-    }
-    fn right(&self, p: Point) -> Option<(Point, char)> {
-        self.in_dir(p, Direction::Rt)
-    }
-    fn left(&self, p: Point) -> Option<(Point, char)> {
-        self.in_dir(p, Direction::Lt)
-    }
-
     fn visit(&self, mut pred: impl FnMut(Point, char)) {
         for r in 0..self.0.len() {
             for c in 0..self.0[r].len() {
-                pred(Point{row: r as u32, col: c as u32}, self.0[r][c]);
+                pred(
+                    Point {
+                        row: r as u32,
+                        col: c as u32,
+                    },
+                    self.0[r][c],
+                );
             }
         }
     }
-}
-
-fn is_top_left(c: char) -> bool {
-    can_go(c, Direction::Dn) && can_go(c, Direction::Rt)
-}
-fn is_top_right(c: char) -> bool {
-    can_go(c, Direction::Dn) && can_go(c, Direction::Lt)
-}
-fn is_btm_left(c: char) -> bool {
-    can_go(c, Direction::Up) && can_go(c, Direction::Rt)
-}
-fn is_btm_right(c: char) -> bool {
-    can_go(c, Direction::Up) && can_go(c, Direction::Lt)
-}
-fn is_horz(c: char) -> bool {
-    can_go(c, Direction::Lt) && can_go(c, Direction::Rt)
-}
-fn is_vert(c: char) -> bool {
-    can_go(c, Direction::Up) && can_go(c, Direction::Dn)
 }
 
 fn top_lefts(lines: &Lines) -> Vec<(Point, char)> {
@@ -160,13 +124,14 @@ fn top_lefts(lines: &Lines) -> Vec<(Point, char)> {
                 row: row as u32,
                 col: col as u32,
             };
-            if is_top_left(c)
+            if can_go(c, Direction::Dn)
+                && can_go(c, Direction::Rt)
                 && lines
-                    .right(p)
+                    .in_dir(p, Direction::Rt)
                     .map(|(_, c)| can_go(c, Direction::Lt))
                     .unwrap_or(false)
                 && lines
-                    .below(p)
+                    .in_dir(p, Direction::Dn)
                     .map(|(_, c)| can_go(c, Direction::Up))
                     .unwrap_or(false)
             {
@@ -196,11 +161,6 @@ fn scan_dir(lines: &Lines, mut p: Point, d: Direction) -> Option<(Point, char)> 
     lines.at(p).map(|c| (p, c))
 }
 
-#[inline]
-fn possible_dirs(c: char, d: Direction, cant_go: Vec<Direction>) -> impl std::iter::Iterator<Item=Direction> {
-    Direction::VALUES.into_iter().filter(move |d| !cant_go.contains(d) && can_go(c, *d))
-}
-
 struct PathIter<'l> {
     start: bool,
     lines: &'l Lines,
@@ -218,7 +178,6 @@ impl<'l> PathIter<'l> {
         }
     }
 }
-
 
 //       * 4
 //   1 2 |
@@ -252,7 +211,12 @@ impl<'l> Iterator for PathIter<'l> {
         let mut cant_go = vec![self.d.neg()];
         loop {
             println!("PathIter {{ p: {:?}, d: {:?} }}", self.p, self.d);
-            if let (Some(true), Some(true)) = (self.lines.at(self.p).map(|c| can_go(c, self.d)), self.lines.in_dir(self.p, self.d).map(|(_, c)| can_go(c, self.d.neg()))) {
+            if let (Some(true), Some(true)) = (
+                self.lines.at(self.p).map(|c| can_go(c, self.d)),
+                self.lines
+                    .in_dir(self.p, self.d)
+                    .map(|(_, c)| can_go(c, self.d.neg())),
+            ) {
                 if let Some((pnext, c)) = scan_dir(self.lines, self.p, self.d) {
                     println!("scan_dir = Some(({:?}, {:?}))", pnext, c);
                     self.p = pnext;
@@ -261,9 +225,13 @@ impl<'l> Iterator for PathIter<'l> {
             }
 
             cant_go.push(self.d);
-            if let Some(dnext) = Direction::VALUES.into_iter().filter(|d| !cant_go.contains(d)).next() {
+            if let Some(dnext) = Direction::VALUES
+                .into_iter()
+                .filter(|d| !cant_go.contains(d))
+                .next()
+            {
                 self.d = dnext;
-                continue
+                continue;
             } else {
                 return None;
             }
@@ -358,10 +326,16 @@ fn border(bounds: (Point, Point)) -> Vec<(Point, Direction)> {
 
 #[inline]
 fn norm_box(b: (Point, Point)) -> (Point, Point) {
-    use std::cmp::{min, max};
+    use std::cmp::{max, min};
     (
-        Point{row: min(b.0.row, b.1.row), col: min(b.0.col, b.1.col)},
-        Point{row: max(b.0.row, b.1.row), col: max(b.0.col, b.1.col)}
+        Point {
+            row: min(b.0.row, b.1.row),
+            col: min(b.0.col, b.1.col),
+        },
+        Point {
+            row: max(b.0.row, b.1.row),
+            col: max(b.0.col, b.1.col),
+        },
     )
 }
 
@@ -402,28 +376,92 @@ fn edges(lines: &Lines, boxes: &Vec<(Point, Point)>) -> HashSet<Vec<Point>> {
             buf[r].push(' ');
         }
     }
-    lines.visit(|p, c| for b in boxes {
-        if box_contains(*b, p) {
-            buf[p.row as usize][p.col as usize] = '#';
-        }
-        if buf[p.row as usize][p.col as usize] != ' ' {
-            return;
-        }
-        if can_go(c, Direction::Up) && box_contains((Point{row: b.1.row+1, col: b.0.col}, Point{row: b.1.row+1, col: b.1.col}), p) {
-            buf[p.row as usize][p.col as usize] = 'v';
-        } else if can_go(c, Direction::Lt) && box_contains((Point{row: b.0.row, col: b.1.col+1}, Point{row: b.1.row, col: b.1.col+1}), p) {
-            buf[p.row as usize][p.col as usize] = '>';
-        } else if can_go(c, Direction::Dn) && b.0.in_dir(Direction::Up)
-            .map(|p0| box_contains((p0, Point{row: p0.row, col: b.1.col}), p))
-            .unwrap_or(false) {
-            buf[p.row as usize][p.col as usize] = '^';
-        } else if can_go(c, Direction::Rt) && b.0.in_dir(Direction::Lt)
-            .map(|p0| box_contains((p0, Point{row: b.1.row, col: p0.col}), p))
-            .unwrap_or(false) {
-            buf[p.row as usize][p.col as usize] = '<';
+    lines.visit(|p, c| {
+        for b in boxes {
+            if box_contains(*b, p) {
+                buf[p.row as usize][p.col as usize] = '#';
+            }
+            if buf[p.row as usize][p.col as usize] != ' ' {
+                return;
+            }
+            if can_go(c, Direction::Up)
+                && box_contains(
+                    (
+                        Point {
+                            row: b.1.row + 1,
+                            col: b.0.col,
+                        },
+                        Point {
+                            row: b.1.row + 1,
+                            col: b.1.col,
+                        },
+                    ),
+                    p,
+                )
+            {
+                buf[p.row as usize][p.col as usize] = 'v';
+            } else if can_go(c, Direction::Lt)
+                && box_contains(
+                    (
+                        Point {
+                            row: b.0.row,
+                            col: b.1.col + 1,
+                        },
+                        Point {
+                            row: b.1.row,
+                            col: b.1.col + 1,
+                        },
+                    ),
+                    p,
+                )
+            {
+                buf[p.row as usize][p.col as usize] = '>';
+            } else if can_go(c, Direction::Dn)
+                && b.0
+                    .in_dir(Direction::Up)
+                    .map(|p0| {
+                        box_contains(
+                            (
+                                p0,
+                                Point {
+                                    row: p0.row,
+                                    col: b.1.col,
+                                },
+                            ),
+                            p,
+                        )
+                    })
+                    .unwrap_or(false)
+            {
+                buf[p.row as usize][p.col as usize] = '^';
+            } else if can_go(c, Direction::Rt)
+                && b.0
+                    .in_dir(Direction::Lt)
+                    .map(|p0| {
+                        box_contains(
+                            (
+                                p0,
+                                Point {
+                                    row: b.1.row,
+                                    col: p0.col,
+                                },
+                            ),
+                            p,
+                        )
+                    })
+                    .unwrap_or(false)
+            {
+                buf[p.row as usize][p.col as usize] = '<';
+            }
         }
     });
-    println!("MAP[{},_]\n{}", buf.len(), buf.iter().map(|l| l.iter().collect::<String>() + "\n").collect::<String>());
+    println!(
+        "MAP[{},_]\n{}",
+        buf.len(),
+        buf.iter()
+            .map(|l| l.iter().collect::<String>() + "\n")
+            .collect::<String>()
+    );
     //   ###
     //  ,---. ##
     // #|   |,--.  find all possible starts for edges between boxes
@@ -434,7 +472,7 @@ fn edges(lines: &Lines, boxes: &Vec<(Point, Point)>) -> HashSet<Vec<Point>> {
         .map(|b| border(*b))
         .flat_map(|v| v.into_iter())
         .filter(|(p, d)| lines.at(*p).map(|c| can_go(c, d.neg())).unwrap_or(false))
-        .map(|(p, d)| scan_path(lines, p, dbg!(p, d).1) )
+        .map(|(p, d)| scan_path(lines, p, dbg!(p, d).1))
         .filter(|pth| pth.len() > 0)
         .fold(HashSet::new(), |mut map, mut pth| {
             if !map.contains(&pth) {
@@ -569,54 +607,49 @@ mod test {
             Point { row: 3, col: 18 },
             Point { row: 3, col: 12 },
             Point { row: 5, col: 12 },
-            Point { row: 5, col: 10 }
+            Point { row: 5, col: 10 },
         ];
 
-        assert_eq!(
-            pth,
-            scan_path(&lines, pth[0], Direction::Rt),
-        );
+        assert_eq!(pth, scan_path(&lines, pth[0], Direction::Rt),);
         // should work in reverse
         pth.reverse();
-        assert_eq!(
-            pth,
-            scan_path(&lines, pth[0], Direction::Rt),
-        );
+        assert_eq!(pth, scan_path(&lines, pth[0], Direction::Rt),);
 
         // |--' |--'
         //  ^     ^
         // instead of the beginning, start a little aways
         pth[0].col += 1;
-        assert_eq!(
-            pth,
-            scan_path(&lines, pth[0], Direction::Rt),
-        );
+        assert_eq!(pth, scan_path(&lines, pth[0], Direction::Rt),);
     }
 
     #[test]
     fn test_box_contains() {
-        let lb = (Point{row: 1, col: 1}, Point{row: 4, col: 5});
+        let lb = (Point { row: 1, col: 1 }, Point { row: 4, col: 5 });
 
-        assert_eq!(
-            true,
-            box_contains(lb, lb.0) && box_contains(lb, lb.1)
-        );
-        assert_eq!(
-            false,
-            box_contains(lb, Point{row: 5, col: 4}),
-        );
+        assert_eq!(true, box_contains(lb, lb.0) && box_contains(lb, lb.1));
+        assert_eq!(false, box_contains(lb, Point { row: 5, col: 4 }),);
     }
 
     #[test]
     fn test_border() {
-        let b = (Point{row: 1, col: 1}, Point{row: 3, col: 4});
+        let b = (Point { row: 1, col: 1 }, Point { row: 3, col: 4 });
         use Direction::*;
         assert_eq!(
             vec![
-                (Point { row: 0, col: 1 }, Up), (Point { row: 0, col: 2 }, Up), (Point { row: 0, col: 3 }, Up), (Point { row: 0, col: 4 }, Up),
-                (Point { row: 1, col: 0 }, Lt), (Point { row: 2, col: 0 }, Lt), (Point { row: 3, col: 0 }, Lt),
-                (Point { row: 1, col: 5 }, Dn), (Point { row: 2, col: 5 }, Dn), (Point { row: 3, col: 5 }, Dn),
-                (Point { row: 4, col: 1 }, Rt), (Point { row: 4, col: 2 }, Rt), (Point { row: 4, col: 3 }, Rt), (Point { row: 4, col: 4 }, Rt)
+                (Point { row: 0, col: 1 }, Up),
+                (Point { row: 0, col: 2 }, Up),
+                (Point { row: 0, col: 3 }, Up),
+                (Point { row: 0, col: 4 }, Up),
+                (Point { row: 1, col: 0 }, Lt),
+                (Point { row: 2, col: 0 }, Lt),
+                (Point { row: 3, col: 0 }, Lt),
+                (Point { row: 1, col: 5 }, Dn),
+                (Point { row: 2, col: 5 }, Dn),
+                (Point { row: 3, col: 5 }, Dn),
+                (Point { row: 4, col: 1 }, Rt),
+                (Point { row: 4, col: 2 }, Rt),
+                (Point { row: 4, col: 3 }, Rt),
+                (Point { row: 4, col: 4 }, Rt)
             ],
             border(b)
         )
