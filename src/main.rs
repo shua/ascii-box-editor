@@ -24,7 +24,7 @@ impl Direction {
     const VALUES: [Direction; 4] = [Direction::Up, Direction::Dn, Direction::Lt, Direction::Rt];
 
     #[inline]
-    fn neg(self) -> Direction {
+    fn rev(self) -> Direction {
         use Direction::*;
         match self {
             Up => Dn,
@@ -169,7 +169,7 @@ fn scan_dir(lines: &Lines, mut p: Point, d: Direction) -> Option<(Point, char)> 
         //  p
         // --* < can't connect
         //
-        if !can_go(c, d.neg()) {
+        if !can_go(c, d.rev()) {
             return lines.at(p).map(|c| (p, c));
         }
         p = q;
@@ -230,14 +230,14 @@ impl<'l> Iterator for PathIter<'l> {
             return Some(self.p);
         }
 
-        let mut cant_go = vec![self.d.neg()];
+        let mut cant_go = vec![self.d.rev()];
         loop {
             // println!("PathIter {{ p: {:?}, d: {:?} }}", self.p, self.d);
             if let (Some(true), Some(true)) = (
                 self.lines.at(self.p).map(|c| can_go(c, self.d)),
                 self.lines
                     .in_dir(self.p, self.d)
-                    .map(|(_, c)| can_go(c, self.d.neg())),
+                    .map(|(_, c)| can_go(c, self.d.rev())),
             ) {
                 if let Some((pnext, c)) = scan_dir(self.lines, self.p, self.d) {
                     // println!("scan_dir = Some(({:?}, {:?}))", pnext, c);
@@ -349,7 +349,7 @@ fn edges(lines: &Lines, boxes: &Vec<TBox>) -> HashSet<Vec<Point>> {
         .iter()
         .map(|b| border(*b))
         .flat_map(|v| v.into_iter())
-        .filter(|(p, d)| lines.at(*p).map(|c| can_go(c, d.neg())).unwrap_or(false))
+        .filter(|(p, d)| lines.at(*p).map(|c| can_go(c, d.rev())).unwrap_or(false))
         .map(|(p, d)| scan_path(lines, p, d))
         .filter(|pth| pth.len() > 0)
         .fold(HashSet::new(), |mut map, mut pth| {
