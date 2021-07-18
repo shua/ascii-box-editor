@@ -1,11 +1,14 @@
 use std::collections::HashSet;
 use std::io::prelude::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct Point {
     row: u32,
     col: u32,
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct TBox(Point, Point);
 
 struct Lines(Vec<Vec<char>>);
 
@@ -47,40 +50,65 @@ fn can_go(c: char, d: Direction) -> bool {
     }
 }
 
+impl From<(u32, u32)> for Point {
+    #[inline]
+    fn from(p: (u32, u32)) -> Point {
+        Point { row: p.0, col: p.1 }
+    }
+}
+
+impl std::fmt::Debug for Point {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{:?}", (self.row, self.col))
+    }
+}
+
 impl Point {
     #[inline]
     fn in_dir(self, d: Direction) -> Option<Point> {
         use Direction::*;
         match d {
-            Dn => Some(Point {
-                row: self.row + 1,
-                col: self.col,
-            }),
+            Dn => Some(Point::from((self.row + 1, self.col))),
             Up => {
                 if self.row == 0 {
                     None
                 } else {
-                    Some(Point {
-                        row: self.row - 1,
-                        col: self.col,
-                    })
+                    Some(Point::from((self.row - 1, self.col)))
                 }
             }
-            Rt => Some(Point {
-                row: self.row,
-                col: self.col + 1,
-            }),
+            Rt => Some(Point::from((self.row, self.col + 1))),
             Lt => {
                 if self.col == 0 {
                     None
                 } else {
-                    Some(Point {
-                        row: self.row,
-                        col: self.col - 1,
-                    })
+                    Some(Point::from((self.row, self.col - 1)))
                 }
             }
         }
+    }
+}
+
+impl From<(Point, Point)> for TBox {
+    #[inline]
+    fn from(b: (Point, Point)) -> TBox {
+        use std::cmp::{max, min};
+        TBox(
+            (min(b.0.row, b.1.row), min(b.0.col, b.1.col)).into(),
+            (max(b.0.row, b.1.row), max(b.0.col, b.1.col)).into(),
+        )
+    }
+}
+
+impl std::fmt::Debug for TBox {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "[{:?} {:?}]", self.0, self.1)
+    }
+}
+
+impl TBox {
+    #[inline]
+    fn contains(&self, p: Point) -> bool {
+        p.row >= self.0.row && p.row <= self.1.row && p.col >= self.0.col && p.col <= self.1.col
     }
 }
 
@@ -103,13 +131,7 @@ impl Lines {
     fn visit(&self, mut pred: impl FnMut(Point, char)) {
         for r in 0..self.0.len() {
             for c in 0..self.0[r].len() {
-                pred(
-                    Point {
-                        row: r as u32,
-                        col: c as u32,
-                    },
-                    self.0[r][c],
-                );
+                pred((r as u32, c as u32).into(), self.0[r][c]);
             }
         }
     }
@@ -210,7 +232,7 @@ impl<'l> Iterator for PathIter<'l> {
 
         let mut cant_go = vec![self.d.neg()];
         loop {
-            println!("PathIter {{ p: {:?}, d: {:?} }}", self.p, self.d);
+            // println!("PathIter {{ p: {:?}, d: {:?} }}", self.p, self.d);
             if let (Some(true), Some(true)) = (
                 self.lines.at(self.p).map(|c| can_go(c, self.d)),
                 self.lines
@@ -218,7 +240,7 @@ impl<'l> Iterator for PathIter<'l> {
                     .map(|(_, c)| can_go(c, self.d.neg())),
             ) {
                 if let Some((pnext, c)) = scan_dir(self.lines, self.p, self.d) {
-                    println!("scan_dir = Some(({:?}, {:?}))", pnext, c);
+                    // println!("scan_dir = Some(({:?}, {:?}))", pnext, c);
                     self.p = pnext;
                     return Some(pnext);
                 }
@@ -254,10 +276,10 @@ fn scan_path(lines: &Lines, p: Point, d: Direction) -> Vec<Point> {
     ret
 }
 
-fn boxes(lines: &Lines) -> Vec<(Point, Point)> {
+fn boxes(lines: &Lines) -> Vec<TBox> {
     top_lefts(lines)
         .into_iter()
-        .map(|tl| {
+        .filter_map(|tl| {
             let tr = scan_dir(lines, tl.0, Direction::Rt)?;
             let bl = scan_dir(lines, tl.0, Direction::Dn)?;
             let br = scan_dir(lines, bl.0, Direction::Rt)?;
@@ -265,83 +287,32 @@ fn boxes(lines: &Lines) -> Vec<(Point, Point)> {
             if br2 != br {
                 return None;
             }
-            Some((tl.0, br.0))
+            Some(TBox(tl.0, br.0))
         })
-        .fold(vec![], |mut acc, b| match b {
-            Some(b) => {
-                acc.push(b);
-                acc
-            }
-            _ => acc,
-        })
+        .collect()
 }
 
-fn border(bounds: (Point, Point)) -> Vec<(Point, Direction)> {
-    let mut ret = Vec::with_capacity(
-        2 * ((bounds.1.row - bounds.0.row) + (bounds.1.col - bounds.0.col)) as usize,
-    );
-    let (col0, row0) = (bounds.0.col > 0, bounds.0.row > 0);
+fn border(b: TBox) -> Vec<(Point, Direction)> {
+    let mut ret = Vec::with_capacity(2 * ((b.1.row - b.0.row) + (b.1.col - b.0.col)) as usize);
+    let (col0, row0) = (b.0.col > 0, b.0.row > 0);
+    use Direction::*;
     if row0 {
-        for i in bounds.0.col..=bounds.1.col {
-            ret.push((
-                Point {
-                    row: bounds.0.row - 1,
-                    col: i,
-                },
-                Direction::Up,
-            ));
+        for i in b.0.col..=b.1.col {
+            ret.push(((b.0.row - 1, i).into(), Up));
         }
     }
     if col0 {
-        for i in bounds.0.row..=bounds.1.row {
-            ret.push((
-                Point {
-                    row: i,
-                    col: bounds.0.col - 1,
-                },
-                Direction::Lt,
-            ));
+        for i in b.0.row..=b.1.row {
+            ret.push(((i, b.0.col - 1).into(), Lt));
         }
     }
-    for i in bounds.0.row..=bounds.1.row {
-        ret.push((
-            Point {
-                row: i,
-                col: bounds.1.col + 1,
-            },
-            Direction::Dn,
-        ));
+    for i in b.0.row..=b.1.row {
+        ret.push(((i, b.1.col + 1).into(), Dn));
     }
-    for i in bounds.0.col..=bounds.1.col {
-        ret.push((
-            Point {
-                row: bounds.1.row + 1,
-                col: i,
-            },
-            Direction::Rt,
-        ));
+    for i in b.0.col..=b.1.col {
+        ret.push(((b.1.row + 1, i).into(), Rt));
     }
     ret
-}
-
-#[inline]
-fn norm_box(b: (Point, Point)) -> (Point, Point) {
-    use std::cmp::{max, min};
-    (
-        Point {
-            row: min(b.0.row, b.1.row),
-            col: min(b.0.col, b.1.col),
-        },
-        Point {
-            row: max(b.0.row, b.1.row),
-            col: max(b.0.col, b.1.col),
-        },
-    )
-}
-
-#[inline]
-fn box_contains(b: (Point, Point), p: Point) -> bool {
-    p.row >= b.0.row && p.row <= b.1.row && p.col >= b.0.col && p.col <= b.1.col
 }
 
 #[inline]
@@ -360,7 +331,7 @@ fn path_contains(pth: &Vec<Point>, p: Point) -> bool {
         return true;
     }
     while let Some(next) = it.next() {
-        if box_contains(norm_box((*last, *next)), p) {
+        if TBox::from((*last, *next)).contains(p) {
             return true;
         }
         last = next;
@@ -368,100 +339,7 @@ fn path_contains(pth: &Vec<Point>, p: Point) -> bool {
     false
 }
 
-fn edges(lines: &Lines, boxes: &Vec<(Point, Point)>) -> HashSet<Vec<Point>> {
-    let mut buf = Vec::with_capacity(lines.0.len());
-    for r in 0..lines.0.len() {
-        buf.push(Vec::with_capacity(lines.0[r].len()));
-        for _ in 0..lines.0[r].len() {
-            buf[r].push(' ');
-        }
-    }
-    lines.visit(|p, c| {
-        for b in boxes {
-            if box_contains(*b, p) {
-                buf[p.row as usize][p.col as usize] = '#';
-            }
-            if buf[p.row as usize][p.col as usize] != ' ' {
-                return;
-            }
-            if can_go(c, Direction::Up)
-                && box_contains(
-                    (
-                        Point {
-                            row: b.1.row + 1,
-                            col: b.0.col,
-                        },
-                        Point {
-                            row: b.1.row + 1,
-                            col: b.1.col,
-                        },
-                    ),
-                    p,
-                )
-            {
-                buf[p.row as usize][p.col as usize] = 'v';
-            } else if can_go(c, Direction::Lt)
-                && box_contains(
-                    (
-                        Point {
-                            row: b.0.row,
-                            col: b.1.col + 1,
-                        },
-                        Point {
-                            row: b.1.row,
-                            col: b.1.col + 1,
-                        },
-                    ),
-                    p,
-                )
-            {
-                buf[p.row as usize][p.col as usize] = '>';
-            } else if can_go(c, Direction::Dn)
-                && b.0
-                    .in_dir(Direction::Up)
-                    .map(|p0| {
-                        box_contains(
-                            (
-                                p0,
-                                Point {
-                                    row: p0.row,
-                                    col: b.1.col,
-                                },
-                            ),
-                            p,
-                        )
-                    })
-                    .unwrap_or(false)
-            {
-                buf[p.row as usize][p.col as usize] = '^';
-            } else if can_go(c, Direction::Rt)
-                && b.0
-                    .in_dir(Direction::Lt)
-                    .map(|p0| {
-                        box_contains(
-                            (
-                                p0,
-                                Point {
-                                    row: b.1.row,
-                                    col: p0.col,
-                                },
-                            ),
-                            p,
-                        )
-                    })
-                    .unwrap_or(false)
-            {
-                buf[p.row as usize][p.col as usize] = '<';
-            }
-        }
-    });
-    println!(
-        "MAP[{},_]\n{}",
-        buf.len(),
-        buf.iter()
-            .map(|l| l.iter().collect::<String>() + "\n")
-            .collect::<String>()
-    );
+fn edges(lines: &Lines, boxes: &Vec<TBox>) -> HashSet<Vec<Point>> {
     //   ###
     //  ,---. ##
     // #|   |,--.  find all possible starts for edges between boxes
@@ -472,9 +350,11 @@ fn edges(lines: &Lines, boxes: &Vec<(Point, Point)>) -> HashSet<Vec<Point>> {
         .map(|b| border(*b))
         .flat_map(|v| v.into_iter())
         .filter(|(p, d)| lines.at(*p).map(|c| can_go(c, d.neg())).unwrap_or(false))
-        .map(|(p, d)| scan_path(lines, p, dbg!(p, d).1))
+        .map(|(p, d)| scan_path(lines, p, d))
         .filter(|pth| pth.len() > 0)
         .fold(HashSet::new(), |mut map, mut pth| {
+            // checking the forward path then inserting
+            // the reverse means we don't double-count paths
             if !map.contains(&pth) {
                 pth.reverse();
                 map.insert(pth);
@@ -501,19 +381,17 @@ fn main() {
     let lines = Lines(buf);
     let bs = boxes(&lines);
     let es = edges(&lines, &bs);
-    println!("BOXES {:?}", bs);
-    println!("EDGES {:?}", es);
+    println!("BOXES {:#?}", bs);
+    println!("EDGES {:#?}", es);
+
     let rst = "\x1b[0m";
     let mut style = rst;
     for r in 0..lines.0.len() {
         for c in 0..lines.0[r].len() {
-            let p = Point {
-                row: r as u32,
-                col: c as u32,
-            };
+            let p = Point::from((r as u32, c as u32));
             if es.iter().any(|e| path_contains(e, p)) {
                 style = set_style(style, "\x1b[33m");
-            } else if bs.iter().any(|b| box_contains(*b, p)) {
+            } else if bs.iter().any(|b| b.contains(p)) {
                 style = set_style(style, "\x1b[34m");
             } else {
                 style = set_style(style, rst);
@@ -589,8 +467,8 @@ mod test {
         let lines = lines();
         assert_eq!(
             vec![
-                (Point { row: 1, col: 1 }, Point { row: 4, col: 5 }),
-                (Point { row: 2, col: 7 }, Point { row: 6, col: 9 }),
+                TBox(Point { row: 1, col: 1 }, Point { row: 4, col: 5 }),
+                TBox(Point { row: 2, col: 7 }, Point { row: 6, col: 9 }),
             ],
             boxes(&lines),
         );
@@ -624,15 +502,15 @@ mod test {
 
     #[test]
     fn test_box_contains() {
-        let lb = (Point { row: 1, col: 1 }, Point { row: 4, col: 5 });
+        let lb = TBox(Point { row: 1, col: 1 }, Point { row: 4, col: 5 });
 
-        assert_eq!(true, box_contains(lb, lb.0) && box_contains(lb, lb.1));
-        assert_eq!(false, box_contains(lb, Point { row: 5, col: 4 }),);
+        assert_eq!(true, lb.contains(lb.0) && lb.contains(lb.1));
+        assert_eq!(false, lb.contains(Point { row: 5, col: 4 }),);
     }
 
     #[test]
     fn test_border() {
-        let b = (Point { row: 1, col: 1 }, Point { row: 3, col: 4 });
+        let b = TBox(Point { row: 1, col: 1 }, Point { row: 3, col: 4 });
         use Direction::*;
         assert_eq!(
             vec![
